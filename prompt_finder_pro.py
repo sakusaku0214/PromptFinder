@@ -1770,6 +1770,11 @@ class PromptFinderWindow(QMainWindow):
         self._current_detail_row: dict | None = None
         self._duplicate_keep_by_path: dict[str, tuple[str, int, str]] = {}
         self._duplicate_mode = False
+        # 自動スキャンの更新で一覧の表示位置を保持するための状態
+        self._restore_after_search = False
+        self._view_restore: tuple[int, dict] | None = None
+        self._display_mode = "normal"
+        self._closing = False
 
         self._build_ui()
         self._setup_shortcuts()
@@ -2144,6 +2149,15 @@ class PromptFinderWindow(QMainWindow):
             pass
 
     def closeEvent(self, event):
+        self.monitor.stop()
+        self._closing = True
+        running = any(worker.isRunning() for worker in self._active_workers)
+        running = running or (hasattr(self, "worker") and self.worker.isRunning())
+        if running or self.model.pool.activeThreadCount():
+            event.ignore()
+            self.statusBar().showMessage("処理の完了を待って終了します…")
+            QTimer.singleShot(100, self.close)
+            return
         self._save_config()
         super().closeEvent(event)
 
@@ -2199,6 +2213,8 @@ class PromptFinderWindow(QMainWindow):
         self.statusBar().showMessage(f"メタデータ・ハッシュ抽出中: {current} / {total} 枚")
 
     def on_scan_finished(self, added_count: int, removed_count: int, ignored_count: int):
+        if self._closing:
+            return
         self.btn_scan.setEnabled(True)
         self.progress_bar.setVisible(False)
         self.chk_force_rescan.setChecked(False)
@@ -2206,10 +2222,16 @@ class PromptFinderWindow(QMainWindow):
             self.statusBar().showMessage("フォルダ監視: 変更なし")
             return
         self.model.cache.clear()
+        if self._automatic_scan and self._display_mode != "normal":
+            self.statusBar().showMessage("フォルダを更新しました。現在の類似・重複結果は再検索で更新できます")
+            return
         self._refresh_filter_combos()
         self.statusBar().showMessage(
             f"スキャン完了（画像登録: {added_count}件 / 読取対象外: {ignored_count}件 / 削除整理: {removed_count}件）"
         )
+        if self._automatic_scan:
+            # サイレント更新で閲覧中の位置が飛ばないよう、次の検索で表示状態を復元する
+            self._restore_after_search = True
         self.perform_search()
 
     # --- 非同期検索 & フィルタクリア & 類似検索 ---
@@ -2227,6 +2249,9 @@ class PromptFinderWindow(QMainWindow):
         self.perform_search()
 
     def find_duplicates(self):
+        self._display_mode = "duplicates"
+        self._view_restore = None
+        self._restore_after_search = False
         if any(isinstance(w, DuplicateWorker) and w.isRunning() for w in self._active_workers):
             return
         self.search_seq += 1
@@ -2271,6 +2296,7 @@ class PromptFinderWindow(QMainWindow):
             return
         self._duplicate_mode = True
         self._duplicate_keep_by_path = keep_by_path
+        self._display_mode = "duplicates"
         self.model.set_items(rows)
         self._update_counters()
         self.list_view.scrollToTop()
@@ -2301,12 +2327,17 @@ class PromptFinderWindow(QMainWindow):
         )
 
     def perform_search(self):
+        self._display_mode = "normal"
         self._duplicate_mode = False
         self._duplicate_keep_by_path = {}
         self.btn_select_old_duplicates.setEnabled(False)
         self.btn_delete_duplicates.setEnabled(False)
         self.search_seq += 1
         seq = self.search_seq
+        self._view_restore = None
+        if self._restore_after_search:
+            self._restore_after_search = False
+            self._view_restore = (seq, self._capture_view_state())
         params = {
             "query": self.search_input.text(),
             "include_negative": self.chk_negative.isChecked(),
@@ -2324,6 +2355,9 @@ class PromptFinderWindow(QMainWindow):
         worker.start()
 
     def search_similar_prompt(self):
+        self._display_mode = "similar_prompt"
+        self._view_restore = None
+        self._restore_after_search = False
         rows = self._selected_rows()
         if not rows:
             QMessageBox.information(self, "類似プロンプト検索", "基準にする画像を1枚選択してください。")
@@ -2341,6 +2375,9 @@ class PromptFinderWindow(QMainWindow):
         worker.start()
 
     def search_similar_visual(self):
+        self._display_mode = "similar_visual"
+        self._view_restore = None
+        self._restore_after_search = False
         rows = self._selected_rows()
         if not rows:
             QMessageBox.information(self, "見た目類似検索", "基準にする画像を1枚選択してください。")
@@ -2357,12 +2394,69 @@ class PromptFinderWindow(QMainWindow):
         self._track_worker(worker)
         worker.start()
 
+    def _capture_view_state(self) -> dict:
+        """自動スキャンの更新で一覧が飛ばないよう、表示位置と選択を覚える。"""
+        state: dict = {"top_path": None, "dy": 0, "selected": []}
+        viewport = self.list_view.viewport()
+        # Include visible neighbours so deletion of the first image has a fallback.
+        visible = []
+        bounds = viewport.rect()
+        for row, item in enumerate(self.model.items):
+            rect = self.list_view.visualRect(self.model.index(row))
+            if rect.intersects(bounds):
+                visible.append((rect.top(), rect.left(), item["path"]))
+        visible.sort()
+        state["anchors"] = [(path, top) for top, _, path in visible]
+        state["scroll"] = self.list_view.verticalScrollBar().value()
+        if visible:
+            state["dy"], _, state["top_path"] = visible[0]
+        selection = self.list_view.selectionModel()
+        if selection is not None:
+            state["selected"] = [
+                self.model.items[idx.row()]["path"]
+                for idx in selection.selectedIndexes()
+                if 0 <= idx.row() < len(self.model.items)
+            ]
+        return state
+
+    def _restore_view_state(self, state: dict):
+        """_capture_view_state で覚えた表示位置と選択を、再検索後のモデルへ戻す。"""
+        selection = self.list_view.selectionModel()
+        if selection is not None and state["selected"]:
+            bulk = QItemSelection()
+            for path in state["selected"]:
+                row = self.model.path_to_row.get(path)
+                if row is not None:
+                    index = self.model.index(row, 0)
+                    bulk.select(index, index)
+            if not bulk.isEmpty():
+                selection.select(bulk, QItemSelectionModel.Select)
+        self.list_view.doItemsLayout()
+        bar = self.list_view.verticalScrollBar()
+        for path, dy in state.get("anchors", []):
+            row = self.model.path_to_row.get(path)
+            if row is not None:
+                index = self.model.index(row)
+                self.list_view.scrollTo(index, QAbstractItemView.PositionAtTop)
+                bar.setValue(bar.value() + self.list_view.visualRect(index).top() - dy)
+                return
+        bar.setValue(state.get("scroll", 0))
+
     def _on_search_completed(self, seq_id: int, results: list[dict], info_text: str, mode: str):
         if seq_id != self.search_seq:
             return
+        self._display_mode = mode
         self.model.set_items(results)
         self._update_counters()
-        self.list_view.scrollToTop()
+        restore_state = None
+        if self._view_restore is not None:
+            if self._view_restore[0] == seq_id:
+                restore_state = self._view_restore[1]
+            self._view_restore = None
+        if mode == "normal" and restore_state is not None:
+            self._restore_view_state(restore_state)
+        else:
+            self.list_view.scrollToTop()
         if mode == "normal":
             if info_text:
                 self.statusBar().showMessage(f"検索結果: {len(results):,} 件 ｜ {info_text}")
@@ -2471,6 +2565,8 @@ class PromptFinderWindow(QMainWindow):
         rows = self._selected_rows()
         if not rows:
             return
+        selected_paths = [self.model.items[r]["path"] for r in rows]
+        duplicate_checks = dict(self._duplicate_keep_by_path) if self._duplicate_mode else {}
         # In duplicate view, refuse deletion of the preserved newest copy.
         if self._duplicate_mode:
             selected = [self.model.items[r]["path"] for r in rows]
@@ -2499,8 +2595,16 @@ class PromptFinderWindow(QMainWindow):
             return
 
         deleted_paths = []
-        for r in rows:
-            raw_path = self.model.items[r]["path"]
+        for raw_path in selected_paths:
+            if raw_path in duplicate_checks:
+                keeper, size, digest = duplicate_checks[raw_path]
+                try:
+                    if os.path.getsize(raw_path) != size or os.path.getsize(keeper) != size or sha256_file(raw_path) != digest or sha256_file(keeper) != digest:
+                        QMessageBox.warning(self, "変更を検出", "確認中に画像が変更されました。重複検索をやり直してください。")
+                        break
+                except OSError:
+                    QMessageBox.warning(self, "ファイル確認エラー", "画像を再確認できないため移動を中止しました。")
+                    break
             norm_path = os.path.normpath(raw_path)
             try:
                 if os.path.exists(norm_path):

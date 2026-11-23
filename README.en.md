@@ -58,3 +58,11 @@ Online translation is off by default. Enable the Google option to translate unkn
 ## v1.3.0
 
 Registered folders are checked about every 60 seconds. The index supports ordinary images, same-name .txt captions, NovelAI stealth PNGs and JPEGs containing ComfyUI graphs. Duplicate searches reuse stored SHA-256 hashes.
+
+## Updates on main (pending a packaged release)
+
+Automatic scans preserve the scroll position and selection, using a visible neighbour if the first image disappears. Similarity and duplicate views stay open during automatic scans. File deletion retains the original target paths across confirmation dialogs, and duplicate files are checked again after confirmation. Closing waits for running tasks.
+
+Windows tests covered a real 60-second scan, retained scroll position and two selected images, a deleted anchor, list reordering and changed files during confirmation, and closing during background work.
+
+Monitoring runs about every 60 seconds while the app is open. Reduced-size decoding depends on image format. The thumbnail cache has no overall size limit yet. Prompt similarity searches use up to 3,000 candidates. Metadata support depends on the embedding format.
