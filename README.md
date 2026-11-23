@@ -6,9 +6,9 @@ PromptFinderPro は、Windows に保存した AI 生成画像を、画像に埋�
 
 ## ダウンロード
 
-**v1.2.0 · Windows 10 / 11（64 ビット）· ポータブル版 · Python 不要**
+**v1.3.0 · Windows 10 / 11（64 ビット）· ポータブル版 · Python 不要**
 
-[Windows 版 ZIP](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.2.0/PromptFinderPro_v1.2.0_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.2.0/SHA256SUMS.txt) · [最新版のリリースページ](https://github.com/sakusaku0214/PromptFinder/releases/latest)
+[Windows 版 ZIP](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.3.0/PromptFinderPro_v1.3.0_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.3.0/SHA256SUMS.txt) · [最新版のリリースページ](https://github.com/sakusaku0214/PromptFinder/releases/latest)
 
 1. ZIP を右クリックし、「すべて展開」で書き込み可能なフォルダーに展開します。
 2. 展開先の `PromptFinderPro.exe` を起動します。Windows の警告が表示された場合は、配布元と SHA-256 を確認してください。
@@ -17,7 +17,7 @@ PromptFinderPro は、Windows に保存した AI 生成画像を、画像に埋�
 ZIP とチェックサムを同じフォルダーに保存し、PowerShell で以下を実行すると照合できます。`True` が表示されれば一致です。
 
 ```powershell
-$actual = (Get-FileHash .\PromptFinderPro_v1.2.0_Windows_x64.zip -Algorithm SHA256).Hash
+$actual = (Get-FileHash .\PromptFinderPro_v1.3.0_Windows_x64.zip -Algorithm SHA256).Hash
 $expected = ((Get-Content .\SHA256SUMS.txt -TotalCount 1) -split '\s+')[0]
 $actual -eq $expected
 ```
@@ -83,3 +83,7 @@ EXE をビルドする場合は `python -m PyInstaller --clean PromptFinderPro.s
 外部翻訳は初期設定でオフです。辞書にない日本語もそのまま検索できます。「辞書外の語をGoogleで翻訳」をオンにすると、検索時に辞書外の日本語だけを既存の外部翻訳機能に渡します。フォルダ選択を繰り返して対象を追加できます。以前の単一フォルダー設定も読み込みます。サムネイルは初回表示時にローカルディスクへ保存し、次回から再利用します。
 
 フォーク・改変・無償共有を歓迎します。非商用利用の条件は [LICENSE](LICENSE) を参照してください。
+
+## v1.3.0
+
+登録フォルダーを起動中に約60秒ごとに差分スキャンします。通常画像、同名の .txt、NovelAI ステルス PNG、ComfyUI グラフ入り JPEG に対応し、重複検索では保存済み SHA-256 を再利用します。
