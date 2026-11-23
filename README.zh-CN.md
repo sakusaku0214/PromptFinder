@@ -50,3 +50,7 @@ python prompt_finder_pro.py
 ```
 
 EXE: `python -m PyInstaller --clean PromptFinderPro.spec`
+
+## 开发版
+
+外部翻译默认关闭。启用 Google 选项后，可在搜索时翻译词典以外的日语词语。重复选择文件夹即可添加多个目录。缩略图会缓存在本地磁盘。欢迎非商业用途的修改和免费分享，详见[许可证](LICENSE)。

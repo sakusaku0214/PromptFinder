@@ -23,7 +23,7 @@ except ImportError:
     HAS_DEEP_TRANSLATOR = False
 
 from PySide6.QtCore import (
-    Qt, QThread, Signal, QObject, QRunnable, QThreadPool,
+    QSaveFile, QIODevice, Qt, QThread, Signal, QObject, QRunnable, QThreadPool,
     QAbstractListModel, QModelIndex, QSize, QMimeData, QUrl, QTimer, QItemSelectionModel, QItemSelection
 )
 from PySide6.QtGui import QPixmap, QImage, QAction, QColor, QDrag, QKeySequence, QShortcut, QIcon
@@ -396,7 +396,7 @@ def _expand_variants(term: str, expand_similar: bool) -> list[str]:
     return variants
 
 
-def _token_to_candidates(tok: str, expand_similar: bool) -> tuple[list[str], bool]:
+def _token_to_candidates(tok: str, expand_similar: bool, external_translation: bool = False) -> tuple[list[str], bool]:
     """1トークンを英語タグ候補リストへ変換する。(候補リスト, 日本語翻訳が発生したか)を返す"""
     candidates: list[str] = []
     translated_flag = False
@@ -408,7 +408,8 @@ def _token_to_candidates(tok: str, expand_similar: bool) -> tuple[list[str], boo
                     if v not in candidates:
                         candidates.append(v)
         else:
-            en_text = _translate_ja_to_en(tok)
+            en_text = _translate_ja_to_en(tok) if external_translation else ""
+            translated_flag = bool(en_text)
             if en_text:
                 if " " in en_text:
                     for v in _expand_variants(en_text.replace(" ", "_"), expand_similar):
@@ -432,7 +433,8 @@ def _token_to_candidates(tok: str, expand_similar: bool) -> tuple[list[str], boo
 
 def build_search_groups(
     raw_query: str,
-    expand_similar: bool = False
+    expand_similar: bool = False,
+    external_translation: bool = False
 ) -> tuple[list[list[str]], list[list[str]], str]:
     """
     クエリをAND結合されたOR候補リスト（通常検索用 + マイナス除外用）に変換する。
@@ -456,7 +458,7 @@ def build_search_groups(
             has_exclusion = True
             tok = tok[1:]
 
-        candidates, tr_flag = _token_to_candidates(tok, expand_similar)
+        candidates, tr_flag = _token_to_candidates(tok, expand_similar, external_translation)
         if tr_flag:
             has_translation = True
 
@@ -957,12 +959,13 @@ class DatabaseManager:
         expand_similar: bool = False,
         model_filter: str = "",
         lora_filter: str = "",
-        sort_by: str = "mtime_desc"
+        sort_by: str = "mtime_desc",
+        external_translation: bool = False
     ) -> tuple[list[dict], str]:
         with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
-            inc_groups, exc_groups, display_info = build_search_groups(query, expand_similar)
+            inc_groups, exc_groups, display_info = build_search_groups(query, expand_similar, external_translation)
 
             extra_where = []
             extra_params: list = []
@@ -1242,16 +1245,28 @@ class ThumbnailTask(QRunnable):
         self.signals = signals
 
     def run(self):
-        if not os.path.exists(self.path):
+        path = Path(self.path)
+        try:
+            stat = path.stat()
+        except OSError:
             return
-        img = QImage(self.path)
-        if not img.isNull():
-            scaled = img.scaled(
-                self.size, self.size,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-            self.signals.loaded.emit(self.path, scaled)
+        folder = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "PromptFinderPro" / "thumbnails"
+        key = hashlib.sha256(os.fsencode(os.path.normcase(os.path.abspath(path)))).hexdigest()
+        target = folder / key[:2] / f"{key}-{self.size}-{stat.st_mtime_ns}-{stat.st_size}.png"
+        scaled = QImage(str(target)) if target.is_file() else QImage()
+        if scaled.isNull():
+            image = QImage(str(path))
+            if image.isNull():
+                return
+            scaled = image.scaled(self.size, self.size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                output = QSaveFile(str(target))
+                if output.open(QIODevice.WriteOnly) and scaled.save(output, "PNG"):
+                    output.commit()
+            except OSError:
+                pass
+        self.signals.loaded.emit(self.path, scaled)
 
 
 class ImageGridModel(QAbstractListModel):
@@ -1460,13 +1475,14 @@ class ScanWorker(QThread):
 
     def __init__(
         self,
-        root_dir: str,
+        root_dir: str | list[str],
         exclude_keywords: list[str],
         db: DatabaseManager,
         force_rescan: bool = False
     ):
         super().__init__()
-        self.root_dir = root_dir
+        self.roots = [root_dir] if isinstance(root_dir, str) else root_dir
+        self.scan_errors = False
         self.exclude_keywords = [k.strip().lower() for k in exclude_keywords if k.strip()]
         self.db = db
         self.force_rescan = force_rescan
@@ -1489,6 +1505,8 @@ class ScanWorker(QThread):
                         if ext not in IMAGE_EXTS:
                             continue
                         str_p = entry.path
+                        if str_p in found_paths:
+                            continue
                         found_paths.add(str_p)
                         try:
                             mtime = entry.stat(follow_symlinks=False).st_mtime
@@ -1501,7 +1519,7 @@ class ScanWorker(QThread):
                                 continue
                         to_process.append((str_p, mtime))
         except OSError:
-            pass
+            self.scan_errors = True
 
     def run(self):
         existing = self.db.get_existing_mtimes()
@@ -1509,14 +1527,19 @@ class ScanWorker(QThread):
         found_paths = set()
         to_process = []
 
-        if not self._is_excluded_name(os.path.basename(self.root_dir)):
-            self._scandir_recursive(self.root_dir, existing, ignored, found_paths, to_process)
+        for root in self.roots:
+            if not self._is_excluded_name(os.path.basename(root)):
+                self._scandir_recursive(root, existing, ignored, found_paths, to_process)
 
-        stale_paths = [p for p in existing.keys() if p not in found_paths]
+        # Restrict cleanup to successfully scanned roots.
+        prefixes = tuple(os.path.normcase(os.path.abspath(r)).rstrip(os.sep) + os.sep for r in self.roots)
+        def missing(records):
+            return [p for p in records if p not in found_paths and os.path.normcase(os.path.abspath(p)).startswith(prefixes)]
+
+        stale_paths = [] if self.scan_errors else missing(existing)
         if stale_paths:
             self.db.delete_paths(stale_paths)
-
-        stale_ignored = [p for p in ignored.keys() if p not in found_paths]
+        stale_ignored = [] if self.scan_errors else missing(ignored)
         if stale_ignored:
             self.db.delete_ignored_paths(stale_ignored)
 
@@ -1676,7 +1699,7 @@ class PromptFinderWindow(QMainWindow):
         top_bar = QHBoxLayout()
         top_bar.setSpacing(6)
         self.dir_input = QLineEdit()
-        self.dir_input.setPlaceholderText("画像が保存されているルートフォルダを選択...")
+        self.dir_input.setPlaceholderText("フォルダ選択で追加。複数のパスは | で区切ります")
         btn_browse = QPushButton("フォルダ選択")
         btn_browse.clicked.connect(self.select_folder)
 
@@ -1723,6 +1746,10 @@ class PromptFinderWindow(QMainWindow):
 
         search_bar.addWidget(self.search_input, 4)
         search_bar.addWidget(self.chk_similar_expand)
+        self.chk_external = QCheckBox("辞書外の語をGoogleで翻訳")
+        self.chk_external.setToolTip("オンの場合のみ、辞書にない日本語の検索語をGoogleに送信します")
+        self.chk_external.stateChanged.connect(self.perform_search)
+        search_bar.addWidget(self.chk_external)
         search_bar.addWidget(self.chk_negative)
         search_bar.addWidget(btn_search)
         search_bar.addWidget(btn_reset)
@@ -1971,9 +1998,10 @@ class PromptFinderWindow(QMainWindow):
             except Exception:
                 pass
 
-        self.dir_input.setText(default_cfg["root_dir"])
+        self.dir_input.setText(" | ".join(default_cfg.get("roots", [default_cfg["root_dir"]])))
         self.exclude_input.setText(default_cfg["excludes"])
         self.chk_similar_expand.setChecked(default_cfg["expand_similar"])
+        self.chk_external.setChecked(default_cfg.get("external_translation", False))
         self.chk_negative.setChecked(default_cfg["include_negative"])
 
         idx_r = self.combo_rating.findData(default_cfg.get("min_rating", 0))
@@ -1989,10 +2017,11 @@ class PromptFinderWindow(QMainWindow):
 
     def _save_config(self):
         cfg = {
-            "root_dir": self.dir_input.text().strip(),
+            "roots": self.scan_roots(),
             "excludes": self.exclude_input.text().strip(),
             "expand_similar": self.chk_similar_expand.isChecked(),
             "include_negative": self.chk_negative.isChecked(),
+            "external_translation": self.chk_external.isChecked(),
             "min_rating": self.combo_rating.currentData() or 0,
             "sort_by": self.combo_sort.currentData() or "mtime_desc",
             "window_width": self.width(),
@@ -2010,16 +2039,22 @@ class PromptFinderWindow(QMainWindow):
         super().closeEvent(event)
 
     # --- フォルダ選択 & スキャン ---
+    def scan_roots(self):
+        return list(dict.fromkeys(os.path.normpath(p.strip()) for p in self.dir_input.text().split("|") if p.strip()))
+
     def select_folder(self):
-        start_dir = self.dir_input.text().strip() or ""
+        roots = self.scan_roots()
+        start_dir = roots[-1] if roots else ""
         folder = QFileDialog.getExistingDirectory(self, "画像フォルダを選択", start_dir)
         if folder:
-            self.dir_input.setText(folder)
+            if os.path.normcase(os.path.normpath(folder)) not in {os.path.normcase(r) for r in roots}:
+                roots.append(os.path.normpath(folder))
+            self.dir_input.setText(" | ".join(roots))
             self._save_config()
 
     def start_scan(self):
-        root_dir = self.dir_input.text().strip()
-        if not root_dir or not os.path.isdir(root_dir):
+        root_dir = self.scan_roots()
+        if not root_dir or not all(os.path.isdir(r) for r in root_dir):
             QMessageBox.warning(self, "エラー", "有効な対象フォルダを選択してください。")
             return
 
@@ -2149,6 +2184,7 @@ class PromptFinderWindow(QMainWindow):
         params = {
             "query": self.search_input.text(),
             "include_negative": self.chk_negative.isChecked(),
+            "external_translation": self.chk_external.isChecked(),
             "min_rating": self.combo_rating.currentData() or 0,
             "expand_similar": self.chk_similar_expand.isChecked(),
             "model_filter": self.combo_model.currentData() or "",

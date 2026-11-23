@@ -50,3 +50,7 @@ python prompt_finder_pro.py
 ```
 
 EXE: `python -m PyInstaller --clean PromptFinderPro.spec`
+
+## 개발 버전
+
+외부 번역은 기본적으로 꺼져 있습니다. Google 옵션을 켜면 사전에 없는 일본어 검색어를 번역합니다. 폴더 선택을 반복하여 여러 폴더를 추가할 수 있습니다. 썸네일은 디스크에 캐시됩니다. 비상업적 이용, 수정, 무료 재배포 조건은 [라이선스](LICENSE)를 참고하세요.

@@ -50,3 +50,7 @@ python prompt_finder_pro.py
 ```
 
 EXE: `python -m PyInstaller --clean PromptFinderPro.spec`
+
+## Development version
+
+Online translation is off by default. Enable the Google option to translate unknown Japanese search terms. Add multiple folders by repeating the folder picker. Thumbnails are cached locally across sessions. Noncommercial forks, changes and free redistribution are welcome under the [license](LICENSE).
