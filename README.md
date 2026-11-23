@@ -1,5 +1,7 @@
 # PromptFinderPro
 
+[日本語](README.md) · [English](README.en.md) · [한국어](README.ko.md) · [简体中文](README.zh-CN.md)
+
 PromptFinderPro は、Windows に保存した AI 生成画像を、画像に埋め込まれたプロンプトやモデル名、LoRA 名で探すデスクトップアプリです。過去の生成設定を探し直す、同じプロンプトから作った候補を比較する、保存先が分かれた完全一致コピーを整理するといった作業に向いています。
 
 ## ダウンロード
