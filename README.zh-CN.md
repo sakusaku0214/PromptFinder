@@ -8,9 +8,11 @@
 
 ## 下载与首次扫描
 
-[Windows x64 ZIP · v1.1.2](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.1.2/PromptFinderPro_v1.1.2_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.1.2/SHA256SUMS.txt) · [GitHub Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest)
+[Windows x64 ZIP · v1.1.3](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.1.3/PromptFinderPro_v1.1.3_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.1.3/SHA256SUMS.txt) · [GitHub Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest)
 
 适用于 64 位 Windows 10/11。将便携版 ZIP 解压到可写文件夹，运行 `PromptFinderPro.exe`，无需安装 Python。点击 **フォルダ選択** 选择图片文件夹，再点击 **スキャン / 更新** 建立索引。后续扫描会增量更新。
+
+选中一张或多张缩略图，右键选择 **画像ファイルをコピー**（复制文件）或 **画像ファイルを切り取り**（剪切文件），然后在资源管理器的目标文件夹中粘贴。剪切的文件会在粘贴时移动。拖动默认复制，按住 Shift 可移至支持移动的目标。
 
 ## 如何选择图片管理工具
 
@@ -35,7 +37,7 @@
 将下方 PowerShell 命令输出的哈希值与发布的校验值进行比较。升级时请先退出应用，保留旧文件夹，并将新版本解压到另一文件夹。要沿用评分、索引和设置，请在首次启动前将 `ai_images_index_v2.db` 和 `config.json` 复制到新文件夹。
 
 ```powershell
-Get-FileHash .\PromptFinderPro_v1.1.2_Windows_x64.zip -Algorithm SHA256
+Get-FileHash .\PromptFinderPro_v1.1.3_Windows_x64.zip -Algorithm SHA256
 ```
 
 ## 从源码运行

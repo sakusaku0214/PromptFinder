@@ -1282,6 +1282,10 @@ class ImageGridModel(QAbstractListModel):
         self._priority_counter = 0
         self.endResetModel()
 
+    def flags(self, index):
+        flags = super().flags(index)
+        return flags | Qt.ItemIsDragEnabled if index.isValid() else flags
+
     def rowCount(self, parent=QModelIndex()) -> int:
         return len(self.items)
 
@@ -1352,29 +1356,35 @@ class DraggableImageListView(QListView):
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.DragOnly)
 
-    def startDrag(self, supportedActions):
-        indexes = self.selectionModel().selectedIndexes()
-        rows = sorted({idx.row() for idx in indexes})
-        if not rows:
-            return
-        model = self.model()
-        urls = []
-        for r in rows:
-            path = model.items[r]["path"]
-            if os.path.exists(path):
-                urls.append(QUrl.fromLocalFile(os.path.normpath(path)))
+    def selected_file_urls(self):
+        rows = sorted({index.row() for index in self.selectedIndexes()})
+        paths = [self.model().items[row]["path"] for row in rows]
+        return [QUrl.fromLocalFile(os.path.abspath(path)) for path in paths if os.path.isfile(path)]
+
+    def copy_files(self, cut=False):
+        urls = self.selected_file_urls()
         if not urls:
             return
-
         mime = QMimeData()
         mime.setUrls(urls)
+        effect = 2 if cut else 1  # Windows DROPEFFECT_MOVE / DROPEFFECT_COPY
+        mime.setData('application/x-qt-windows-mime;value="Preferred DropEffect"',
+                     effect.to_bytes(4, "little"))
+        QApplication.clipboard().setMimeData(mime)
 
+    def startDrag(self, supportedActions):
+        urls = self.selected_file_urls()
+        if not urls:
+            return
+        mime = QMimeData()
+        mime.setUrls(urls)
         drag = QDrag(self)
         drag.setMimeData(mime)
-        first_path = model.items[rows[0]]["path"]
+        model = self.model()
+        first_path = os.path.normpath(urls[0].toLocalFile())
         if first_path in model.cache:
             drag.setPixmap(model.cache[first_path].scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        drag.exec(Qt.CopyAction)
+        drag.exec(Qt.CopyAction | Qt.MoveAction, Qt.CopyAction)
 
 
 # ==========================================
@@ -2352,6 +2362,10 @@ class PromptFinderWindow(QMainWindow):
         if not self._selected_rows():
             return
         menu = QMenu(self)
+
+        menu.addAction("画像ファイルをコピー", lambda: self.list_view.copy_files())
+        menu.addAction("画像ファイルを切り取り", lambda: self.list_view.copy_files(cut=True))
+        menu.addSeparator()
 
         act_sim_p = QAction("類似プロンプト検索", self)
         act_sim_p.triggered.connect(self.search_similar_prompt)

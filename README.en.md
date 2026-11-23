@@ -8,9 +8,11 @@ Search your local collection by prompt, checkpoint or LoRA. Start with a Japanes
 
 ## Download and first scan
 
-[Windows x64 ZIP · v1.1.2](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.1.2/PromptFinderPro_v1.1.2_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.1.2/SHA256SUMS.txt) · [GitHub Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest)
+[Windows x64 ZIP · v1.1.3](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.1.3/PromptFinderPro_v1.1.3_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.1.3/SHA256SUMS.txt) · [GitHub Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest)
 
 Windows 10/11 (64-bit). Extract the portable ZIP into a writable folder and run `PromptFinderPro.exe`. Python is optional. Choose your image folder with **フォルダ選択**, then click **スキャン / 更新** to index it. Subsequent scans pick up changes.
+
+Select one or more thumbnails, right-click, and choose **画像ファイルをコピー** (copy files) or **画像ファイルを切り取り** (cut files). Paste into a folder in File Explorer. Cutting moves the originals when you paste. Dragging defaults to copying. Hold Shift to move files to a compatible drop target.
 
 ## Compare search workflows
 
@@ -35,7 +37,7 @@ Click **古い重複を一括選択** to select older copies while protecting on
 Compare the PowerShell hash below with the published checksum. For an upgrade, close the app, keep the old folder and extract the new version separately. To keep ratings, the index and preferences, copy `ai_images_index_v2.db` and `config.json` into the new folder before launch.
 
 ```powershell
-Get-FileHash .\PromptFinderPro_v1.1.2_Windows_x64.zip -Algorithm SHA256
+Get-FileHash .\PromptFinderPro_v1.1.3_Windows_x64.zip -Algorithm SHA256
 ```
 
 ## Run from source
