@@ -20,9 +20,21 @@ $expected = ((Get-Content .\SHA256SUMS.txt -TotalCount 1) -split '\s+')[0]
 $actual -eq $expected
 ```
 
+## PromptFinderPro を選ぶ理由
+
+**「この絵、どんな設定で作ったっけ？」を、日本語の手掛かりからたどれます。** たとえば「青い目」で候補を探し、使った LoRA で絞り込み、気に入った一枚からポジティブプロンプトをコピー。別のシードで作った候補を見返したいときは「類似プロンプト検索」、構図が近い一枚を探したいときは「見た目類似検索」を使えます。
+
+| ソフト | 得意な使い方 |
+| --- | --- |
+| [digiKam](https://www.digikam.org/about/features/) | 写真コレクションを撮影日、場所、人物、階層タグなどから探せます。[重複検索](https://docs.digikam.org/en/maintenance_tools/maintenance_duplicates.html)では画像の類似度の範囲を指定できます。 |
+| [Diffusion Toolkit](https://github.com/RupertAvery/DiffusionToolkit/blob/master/Diffusion.Toolkit/Tips.md) | 生成画像をプロンプトで検索し、サムネイルを WebUI やエクスプローラーへドラッグできます。[ComfyUI ワークフローのデータ検索](https://github.com/RupertAvery/DiffusionToolkit/releases)にも対応しています。 |
+| **PromptFinderPro** | 日本語タグ、モデル、LoRA を手掛かりに生成設定を探し、プロンプトの近さと見た目の近さの両方から作品を見返せます。同じ一覧で、サイズと SHA-256 が一致する保存コピーも整理できます。 |
+
+**よく似た差分は見比べ、同じファイルのコピーだけをまとめて整理できます。** 完全一致のグループごとに更新日時が最新の一枚を保護します。大きなフォルダーでも、照合が何枚まで進んだか、ゴミ箱へ移す候補を何枚選んだかを画面上で確認できます。
+
 ## 生成画像を探す
 
-一般的な画像管理ソフトでは、撮影日、フォルダー、手動タグなどで写真や素材を整理できます。PromptFinderPro は、対応する生成メタデータから検索項目を作り、見つけた画像の生成設定をコピーして再利用する作業に特化しています。生成情報が削除された画像や未対応の形式では、埋め込み情報を使った検索はできません。
+生成情報が削除された画像や未対応の形式では、埋め込み情報を使った検索はできません。
 
 | 操作 | できること |
 | --- | --- |
