@@ -1,0 +1,26 @@
+# Local indexes, private settings, and runtime data
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+config.json
+.env
+.env.*
+*.log
+
+# Build outputs and binaries
+build/
+dist/
+*.exe
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
