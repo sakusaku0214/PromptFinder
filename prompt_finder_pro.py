@@ -5,6 +5,8 @@ import json
 import math
 import sqlite3
 import hashlib
+import gzip
+import io
 import subprocess
 import urllib.request
 import urllib.parse
@@ -26,7 +28,7 @@ from PySide6.QtCore import (
     QSaveFile, QIODevice, Qt, QThread, Signal, QObject, QRunnable, QThreadPool,
     QAbstractListModel, QModelIndex, QSize, QMimeData, QUrl, QTimer, QItemSelectionModel, QItemSelection
 )
-from PySide6.QtGui import QPixmap, QImage, QAction, QColor, QDrag, QKeySequence, QShortcut, QIcon
+from PySide6.QtGui import QImageReader, QPixmap, QImage, QAction, QColor, QDrag, QKeySequence, QShortcut, QIcon
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLineEdit, QListView, QLabel, QFileDialog,
@@ -650,6 +652,58 @@ def _parse_comfyui_graph(data: dict) -> tuple[str, str, str, list[str]]:
     return "\n".join(pos_texts), "\n".join(neg_texts), model_name, loras
 
 
+def stealth_metadata(img):
+    if img.format != "PNG" or "A" not in img.getbands() or img.width * img.height < 152:
+        return {}
+    pixels = img.load()
+    channel = img.getbands().index("A")
+    def octet(i):
+        result = 0
+        for bit in range(i * 8, i * 8 + 8):
+            result = (result << 1) | (pixels[bit // img.height, bit % img.height][channel] & 1)
+        return result
+    if bytes(octet(i) for i in range(15)) != b"stealth_pngcomp":
+        return {}
+    bits = int.from_bytes(bytes(octet(i) for i in range(15, 19)), "big")
+    if bits % 8 or bits > min(img.width * img.height - 152, 8 * 1024 * 1024):
+        return {}
+    try:
+        packed = bytes(octet(i) for i in range(19, 19 + bits // 8))
+        with gzip.GzipFile(fileobj=io.BytesIO(packed)) as stream:
+            data = json.loads(stream.read(4 * 1024 * 1024 + 1))
+        return data if isinstance(data, dict) else {}
+    except (ValueError, OSError, EOFError):
+        return {}
+
+
+def jpeg_graph(img):
+    if img.format != "JPEG":
+        return None
+    exif = img.getexif()
+    values = [img.info.get("comment"), *exif.values()]
+    if 34665 in exif:
+        values.extend(exif.get_ifd(34665).values())
+    for value in values:
+        if isinstance(value, bytes):
+            if value.startswith(b"UNICODE"+bytes(1)):
+                value = value[8:].decode("utf-16" if value[8:10] in (bytes.fromhex("fffe"), bytes.fromhex("feff")) else "utf-16-be", errors="replace")
+            else:
+                value = value.removeprefix(b"ASCII"+bytes(3)).decode("utf-8", errors="replace")
+        if not isinstance(value, str) or "class_type" not in value:
+            continue
+        try:
+            data = json.loads(value[value.index("{"):].strip(chr(0)+" "))
+            if isinstance(data, dict):
+                data = data.get("prompt", data)
+            if isinstance(data, str):
+                data = json.loads(data)
+            if isinstance(data, dict) and any(isinstance(n, dict) and "class_type" in n for n in data.values()):
+                return data
+        except ValueError:
+            continue
+    return None
+
+
 def parse_image_metadata(filepath: str) -> tuple[bool, str, str, str, str, str, str]:
     """
     AI生成画像かどうかを厳格判定し、
@@ -658,8 +712,12 @@ def parse_image_metadata(filepath: str) -> tuple[bool, str, str, str, str, str, 
     """
     try:
         with Image.open(filepath) as img:
-            info = img.info or {}
-
+            info = dict(img.info or {})
+            if not any(k in info for k in ("parameters", "prompt", "Description")):
+                info.update(stealth_metadata(img))
+                graph = jpeg_graph(img)
+                if graph:
+                    info["prompt"] = json.dumps(graph, ensure_ascii=False)
             # 1. Stable Diffusion WebUI (A1111 / Forge)
             if "parameters" in info:
                 raw = str(info["parameters"]).strip()
@@ -693,7 +751,7 @@ def parse_image_metadata(filepath: str) -> tuple[bool, str, str, str, str, str, 
                     except Exception:
                         pass
                 model_name = str(info.get("Source", "NovelAI")).strip()
-                raw = json.dumps(info, ensure_ascii=False)
+                raw = json.dumps(info, ensure_ascii=False, default=str)
                 dhash = compute_dhash(img)
                 return True, pos, neg, raw, model_name, "", dhash
 
@@ -713,6 +771,18 @@ def parse_image_metadata(filepath: str) -> tuple[bool, str, str, str, str, str, 
                                 pos, neg, raw, model_name, loras = _split_a1111_parameters(decoded)
                                 return True, pos, neg, raw, model_name, ",".join(loras), dhash
                             return True, decoded, "", decoded, "", "", dhash
+            sidecar = Path(filepath).with_suffix(".txt")
+            if sidecar.is_file():
+                with sidecar.open("rb") as stream:
+                    payload = stream.read(4 * 1024 * 1024 + 1)
+                if len(payload) <= 4 * 1024 * 1024:
+                    encoding = "utf-16" if payload.startswith((bytes.fromhex("fffe"), bytes.fromhex("feff"))) else "utf-8-sig"
+                    caption = payload.decode(encoding, errors="replace").strip()
+                    if caption:
+                        pos, neg, raw, model, loras = _split_a1111_parameters(caption)
+                        return True, pos, neg, raw, model, ",".join(loras), compute_dhash(img)
+
+            return True, "", "", "", "", "", compute_dhash(img)
     except Exception:
         pass
     return False, "", "", "", "", "", ""
@@ -781,6 +851,8 @@ class DatabaseManager:
             # 高速絞り込み・ソート用インデックス
             cur.execute("CREATE INDEX IF NOT EXISTS idx_images_mtime ON images(mtime DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_images_model ON images(model)")
+            cur.execute("CREATE TABLE IF NOT EXISTS file_hashes(path TEXT PRIMARY KEY, signature TEXT, digest TEXT)")
+            cur.execute("CREATE TABLE IF NOT EXISTS scan_stamps(path TEXT PRIMARY KEY, stamp TEXT)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_images_rating ON images(rating DESC, mtime DESC)")
 
             cur.execute("""
@@ -918,7 +990,8 @@ class DatabaseManager:
                 r = cur.fetchone()
                 if r:
                     cur.execute("DELETE FROM images_fts WHERE rowid = ?", (r[0],))
-            cur.executemany("DELETE FROM images WHERE path = ?", [(p,) for p in paths])
+            for table in ("file_hashes", "scan_stamps", "images"):
+                cur.executemany(f"DELETE FROM {table} WHERE path = ?", [(p,) for p in paths])
             conn.commit()
 
     def set_rating(self, path: str, rating: int) -> int:
@@ -1255,7 +1328,11 @@ class ThumbnailTask(QRunnable):
         target = folder / key[:2] / f"{key}-{self.size}-{stat.st_mtime_ns}-{stat.st_size}.png"
         scaled = QImage(str(target)) if target.is_file() else QImage()
         if scaled.isNull():
-            image = QImage(str(path))
+            reader = QImageReader(str(path))
+            dimensions = reader.size()
+            if dimensions.isValid():
+                reader.setScaledSize(dimensions.scaled(self.size, self.size, Qt.KeepAspectRatio))
+            image = reader.read()
             if image.isNull():
                 return
             scaled = image.scaled(self.size, self.size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -1264,6 +1341,10 @@ class ThumbnailTask(QRunnable):
                 output = QSaveFile(str(target))
                 if output.open(QIODevice.WriteOnly) and scaled.save(output, "PNG"):
                     output.commit()
+                if target.exists() and path.stat().st_mtime_ns == stat.st_mtime_ns:
+                    for old in target.parent.glob(f"{key}-{self.size}-*.png"):
+                        if old != target and old.stat().st_mtime_ns <= target.stat().st_mtime_ns:
+                            old.unlink(missing_ok=True)
             except OSError:
                 pass
         self.signals.loaded.emit(self.path, scaled)
@@ -1483,6 +1564,7 @@ class ScanWorker(QThread):
         super().__init__()
         self.roots = [root_dir] if isinstance(root_dir, str) else root_dir
         self.scan_errors = False
+        self.sync_roots = False
         self.exclude_keywords = [k.strip().lower() for k in exclude_keywords if k.strip()]
         self.db = db
         self.force_rescan = force_rescan
@@ -1512,16 +1594,24 @@ class ScanWorker(QThread):
                             mtime = entry.stat(follow_symlinks=False).st_mtime
                         except OSError:
                             continue
-                        if not self.force_rescan:
-                            if str_p in existing and existing[str_p] == mtime:
-                                continue
-                            if str_p in ignored and ignored[str_p] == mtime:
-                                continue
+                        sidecar = Path(str_p).with_suffix(".txt")
+                        try:
+                            side = sidecar.stat()
+                            side_stamp = f"{side.st_mtime_ns}:{side.st_size}"
+                        except FileNotFoundError:
+                            side_stamp = "-"
+                        stamp = f"{entry.stat().st_mtime_ns}:{entry.stat().st_size}:{side_stamp}"
+                        if not self.force_rescan and self.stamps.get(str_p) == stamp and (str_p in existing or str_p in ignored):
+                            continue
+                        self.changed_stamps.append((str_p, stamp))
                         to_process.append((str_p, mtime))
         except OSError:
             self.scan_errors = True
 
     def run(self):
+        with self.db._connect() as conn:
+            self.stamps = dict(conn.execute("SELECT path, stamp FROM scan_stamps"))
+        self.changed_stamps = []
         existing = self.db.get_existing_mtimes()
         ignored = self.db.get_ignored_mtimes()
         found_paths = set()
@@ -1534,7 +1624,7 @@ class ScanWorker(QThread):
         # Restrict cleanup to successfully scanned roots.
         prefixes = tuple(os.path.normcase(os.path.abspath(r)).rstrip(os.sep) + os.sep for r in self.roots)
         def missing(records):
-            return [p for p in records if p not in found_paths and os.path.normcase(os.path.abspath(p)).startswith(prefixes)]
+            return [p for p in records if p not in found_paths and (self.sync_roots or os.path.normcase(os.path.abspath(p)).startswith(prefixes))]
 
         stale_paths = [] if self.scan_errors else missing(existing)
         if stale_paths:
@@ -1573,6 +1663,9 @@ class ScanWorker(QThread):
                     if reclassified_non_ai:
                         self.db.delete_paths(reclassified_non_ai)
 
+        if self.changed_stamps:
+            with self.db._connect() as conn:
+                conn.executemany("INSERT OR REPLACE INTO scan_stamps VALUES (?,?)", self.changed_stamps)
         self.finished_scan.emit(len(ai_records), len(stale_paths), len(non_ai_records))
 
 
@@ -1600,6 +1693,9 @@ class DuplicateWorker(QThread):
         # Size prefilter dramatically reduces disk I/O on large collections.
         from collections import defaultdict
         by_size = defaultdict(list)
+        with self.db._connect() as conn:
+            hashes = {p: (sig, digest) for p, sig, digest in conn.execute("SELECT path, signature, digest FROM file_hashes")}
+        updates = []
         indexed = self.db.get_duplicate_candidates()
         self.progress_changed.emit(0, 0, f"候補を調査中（登録 {len(indexed):,} 枚）")
         for row in indexed:
@@ -1625,10 +1721,14 @@ class DuplicateWorker(QThread):
                     before = os.stat(path)
                     if before.st_size != size:
                         continue
-                    digest = sha256_file(path)
+                    signature = f"{size}:{before.st_mtime_ns}:{before.st_ctime_ns}:{before.st_ino}"
+                    cached = hashes.get(path)
+                    digest = cached[1] if cached and cached[0] == signature else sha256_file(path)
                     after = os.stat(path)
                     if before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns:
                         continue
+                    if cached != (signature, digest):
+                        updates.append((path, signature, digest))
                     item = dict(row)
                     item["mtime"] = after.st_mtime
                     item["_sha256"] = digest
@@ -1640,6 +1740,9 @@ class DuplicateWorker(QThread):
                     completed += 1
                     if completed % 10 == 0 or completed == candidates:
                         self.progress_changed.emit(completed, max(1, candidates), "ファイル内容を確認中（SHA-256）")
+        if updates:
+            with self.db._connect() as conn:
+                conn.executemany("INSERT OR REPLACE INTO file_hashes VALUES (?,?,?)", updates)
         duplicates = []
         keep_by_path = {}
         for key, rows in groups.items():
@@ -1671,6 +1774,12 @@ class PromptFinderWindow(QMainWindow):
         self._build_ui()
         self._setup_shortcuts()
         self._load_config()
+        self._had_roots = bool(self.scan_roots())
+        self.monitor = QTimer(self)
+        self.monitor.setInterval(60000)
+        self.monitor.timeout.connect(self.monitor_folders)
+        self.monitor.start()
+        self.dir_input.editingFinished.connect(self.monitor_folders)
 
         # ウィンドウ表示をブロックしないよう遅延初期化
         QTimer.singleShot(0, self._initial_load)
@@ -2052,9 +2161,21 @@ class PromptFinderWindow(QMainWindow):
             self.dir_input.setText(" | ".join(roots))
             self._save_config()
 
-    def start_scan(self):
+    def monitor_folders(self):
+        if self.btn_scan.isEnabled() and not self.dir_input.hasFocus():
+            roots = self.scan_roots()
+            if roots and all(os.path.isdir(r) for r in roots):
+                self.start_scan(automatic=True)
+            elif not roots and getattr(self, "_had_roots", False):
+                self.start_scan(automatic=True)
+
+    def start_scan(self, checked=False, *, automatic=False):
+        if not self.btn_scan.isEnabled():
+            return
+        self._automatic_scan = automatic
         root_dir = self.scan_roots()
-        if not root_dir or not all(os.path.isdir(r) for r in root_dir):
+        self._had_roots = bool(root_dir)
+        if not all(os.path.isdir(r) for r in root_dir):
             QMessageBox.warning(self, "エラー", "有効な対象フォルダを選択してください。")
             return
 
@@ -2067,6 +2188,7 @@ class PromptFinderWindow(QMainWindow):
         self.statusBar().showMessage("フォルダを走査中（強制再抽出）..." if force else "フォルダを走査中...")
 
         self.worker = ScanWorker(root_dir, excludes, self.db, force_rescan=force)
+        self.worker.sync_roots = True
         self.worker.progress.connect(self.on_scan_progress)
         self.worker.finished_scan.connect(self.on_scan_finished)
         self.worker.start()
@@ -2080,9 +2202,13 @@ class PromptFinderWindow(QMainWindow):
         self.btn_scan.setEnabled(True)
         self.progress_bar.setVisible(False)
         self.chk_force_rescan.setChecked(False)
+        if self._automatic_scan and not (added_count or removed_count or ignored_count):
+            self.statusBar().showMessage("フォルダ監視: 変更なし")
+            return
+        self.model.cache.clear()
         self._refresh_filter_combos()
         self.statusBar().showMessage(
-            f"スキャン完了（AI画像登録: {added_count}件 / 非AI除外: {ignored_count}件 / 削除整理: {removed_count}件）"
+            f"スキャン完了（画像登録: {added_count}件 / 読取対象外: {ignored_count}件 / 削除整理: {removed_count}件）"
         )
         self.perform_search()
 
