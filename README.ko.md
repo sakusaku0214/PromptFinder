@@ -8,7 +8,7 @@
 
 ## 다운로드 및 첫 스캔
 
-[Windows x64 ZIP · v1.1.3](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.1.3/PromptFinderPro_v1.1.3_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.1.3/SHA256SUMS.txt) · [GitHub Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest)
+[Windows x64 ZIP · v1.2.0](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.2.0/PromptFinderPro_v1.2.0_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.2.0/SHA256SUMS.txt) · [GitHub Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest)
 
 Windows 10/11 64비트용 포터블 버전입니다. ZIP을 쓰기 가능한 폴더에 풀고 `PromptFinderPro.exe`를 실행하세요. Python 설치는 필요 없습니다. **フォルダ選択**에서 이미지 폴더를 고른 다음 **スキャン / 更新**을 누르세요. 이후에는 변경된 파일을 기준으로 인덱스를 갱신합니다.
 
@@ -37,7 +37,7 @@ AUTOMATIC1111 / Forge, ComfyUI, NovelAI의 생성 메타데이터와 지원되�
 아래 PowerShell 명령의 결과를 공개된 체크섬과 비교하세요. 업데이트할 때는 앱을 종료하고 기존 폴더를 보관한 뒤 새 버전을 별도 폴더에 푸세요. 평점, 인덱스, 설정을 이어 쓰려면 첫 실행 전에 `ai_images_index_v2.db`와 `config.json`을 새 폴더에 복사하세요.
 
 ```powershell
-Get-FileHash .\PromptFinderPro_v1.1.3_Windows_x64.zip -Algorithm SHA256
+Get-FileHash .\PromptFinderPro_v1.2.0_Windows_x64.zip -Algorithm SHA256
 ```
 
 ## 소스에서 실행
@@ -51,6 +51,6 @@ python prompt_finder_pro.py
 
 EXE: `python -m PyInstaller --clean PromptFinderPro.spec`
 
-## 개발 버전
+## v1.2.0 변경 사항
 
 외부 번역은 기본적으로 꺼져 있습니다. Google 옵션을 켜면 사전에 없는 일본어 검색어를 번역합니다. 폴더 선택을 반복하여 여러 폴더를 추가할 수 있습니다. 썸네일은 디스크에 캐시됩니다. 비상업적 이용, 수정, 무료 재배포 조건은 [라이선스](LICENSE)를 참고하세요.

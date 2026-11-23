@@ -8,7 +8,7 @@ Search your local collection by prompt, checkpoint or LoRA. Start with a Japanes
 
 ## Download and first scan
 
-[Windows x64 ZIP · v1.1.3](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.1.3/PromptFinderPro_v1.1.3_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.1.3/SHA256SUMS.txt) · [GitHub Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest)
+[Windows x64 ZIP · v1.2.0](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.2.0/PromptFinderPro_v1.2.0_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.2.0/SHA256SUMS.txt) · [GitHub Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest)
 
 Windows 10/11 (64-bit). Extract the portable ZIP into a writable folder and run `PromptFinderPro.exe`. Python is optional. Choose your image folder with **フォルダ選択**, then click **スキャン / 更新** to index it. Subsequent scans pick up changes.
 
@@ -37,7 +37,7 @@ Click **古い重複を一括選択** to select older copies while protecting on
 Compare the PowerShell hash below with the published checksum. For an upgrade, close the app, keep the old folder and extract the new version separately. To keep ratings, the index and preferences, copy `ai_images_index_v2.db` and `config.json` into the new folder before launch.
 
 ```powershell
-Get-FileHash .\PromptFinderPro_v1.1.3_Windows_x64.zip -Algorithm SHA256
+Get-FileHash .\PromptFinderPro_v1.2.0_Windows_x64.zip -Algorithm SHA256
 ```
 
 ## Run from source
@@ -51,6 +51,6 @@ python prompt_finder_pro.py
 
 EXE: `python -m PyInstaller --clean PromptFinderPro.spec`
 
-## Development version
+## New in v1.2.0
 
 Online translation is off by default. Enable the Google option to translate unknown Japanese search terms. Add multiple folders by repeating the folder picker. Thumbnails are cached locally across sessions. Noncommercial forks, changes and free redistribution are welcome under the [license](LICENSE).
