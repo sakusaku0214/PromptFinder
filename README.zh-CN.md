@@ -8,7 +8,7 @@
 
 ## 下载与首次扫描
 
-[Windows x64 ZIP · v1.3.0](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.3.0/PromptFinderPro_v1.3.0_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.3.0/SHA256SUMS.txt) · [GitHub Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest)
+[Windows x64 ZIP · v1.4.0](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.4.0/PromptFinderPro_v1.4.0_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.4.0/SHA256SUMS.txt) · [GitHub Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest)
 
 适用于 64 位 Windows 10/11。将便携版 ZIP 解压到可写文件夹，运行 `PromptFinderPro.exe`，无需安装 Python。点击 **フォルダ選択** 选择图片文件夹，再点击 **スキャン / 更新** 建立索引。后续扫描会增量更新。
 
@@ -37,7 +37,7 @@
 将下方 PowerShell 命令输出的哈希值与发布的校验值进行比较。升级时请先退出应用，保留旧文件夹，并将新版本解压到另一文件夹。要沿用评分、索引和设置，请在首次启动前将 `ai_images_index_v2.db` 和 `config.json` 复制到新文件夹。
 
 ```powershell
-Get-FileHash .\PromptFinderPro_v1.3.0_Windows_x64.zip -Algorithm SHA256
+Get-FileHash .\PromptFinderPro_v1.4.0_Windows_x64.zip -Algorithm SHA256
 ```
 
 ## 从源码运行
@@ -59,7 +59,7 @@ EXE: `python -m PyInstaller --clean PromptFinderPro.spec`
 
 运行期间约每 60 秒扫描已注册的文件夹。支持普通图片、同名 .txt、NovelAI 隐写 PNG 和包含 ComfyUI 图数据的 JPEG。重复搜索会复用已保存的 SHA-256。
 
-## main 更新（尚未包含在发布 ZIP 中）
+## v1.4.0
 
 自动扫描后保留滚动位置和选择。如果顶部图片被删除，会使用附近图片恢复位置。自动扫描期间保留相似及重复搜索视图。删除确认期间固定原文件路径，确认后再次核对重复文件。关闭应用时等待后台任务完成。
 

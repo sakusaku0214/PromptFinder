@@ -8,7 +8,7 @@ Search your local collection by prompt, checkpoint or LoRA. Start with a Japanes
 
 ## Download and first scan
 
-[Windows x64 ZIP · v1.3.0](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.3.0/PromptFinderPro_v1.3.0_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.3.0/SHA256SUMS.txt) · [GitHub Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest)
+[Windows x64 ZIP · v1.4.0](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.4.0/PromptFinderPro_v1.4.0_Windows_x64.zip) · [SHA256SUMS.txt](https://github.com/sakusaku0214/PromptFinder/releases/download/v1.4.0/SHA256SUMS.txt) · [GitHub Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest)
 
 Windows 10/11 (64-bit). Extract the portable ZIP into a writable folder and run `PromptFinderPro.exe`. Python is optional. Choose your image folder with **フォルダ選択**, then click **スキャン / 更新** to index it. Subsequent scans pick up changes.
 
@@ -37,7 +37,7 @@ Click **古い重複を一括選択** to select older copies while protecting on
 Compare the PowerShell hash below with the published checksum. For an upgrade, close the app, keep the old folder and extract the new version separately. To keep ratings, the index and preferences, copy `ai_images_index_v2.db` and `config.json` into the new folder before launch.
 
 ```powershell
-Get-FileHash .\PromptFinderPro_v1.3.0_Windows_x64.zip -Algorithm SHA256
+Get-FileHash .\PromptFinderPro_v1.4.0_Windows_x64.zip -Algorithm SHA256
 ```
 
 ## Run from source
@@ -59,7 +59,7 @@ Online translation is off by default. Enable the Google option to translate unkn
 
 Registered folders are checked about every 60 seconds. The index supports ordinary images, same-name .txt captions, NovelAI stealth PNGs and JPEGs containing ComfyUI graphs. Duplicate searches reuse stored SHA-256 hashes.
 
-## Updates on main (pending a packaged release)
+## v1.4.0
 
 Automatic scans preserve the scroll position and selection, using a visible neighbour if the first image disappears. Similarity and duplicate views stay open during automatic scans. File deletion retains the original target paths across confirmation dialogs, and duplicate files are checked again after confirmation. Closing waits for running tasks.
 
