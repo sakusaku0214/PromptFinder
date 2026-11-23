@@ -1557,6 +1557,7 @@ def sha256_file(path: str) -> str:
 
 class DuplicateWorker(QThread):
     duplicates_found = Signal(list, dict, int)
+    progress_changed = Signal(int, int, str)
 
     def __init__(self, db: DatabaseManager):
         super().__init__()
@@ -1566,7 +1567,9 @@ class DuplicateWorker(QThread):
         # Size prefilter dramatically reduces disk I/O on large collections.
         from collections import defaultdict
         by_size = defaultdict(list)
-        for row in self.db.get_duplicate_candidates():
+        indexed = self.db.get_duplicate_candidates()
+        self.progress_changed.emit(0, 0, f"候補を調査中（登録 {len(indexed):,} 枚）")
+        for row in indexed:
             path = row["path"]
             try:
                 if os.path.isfile(path) and not os.path.islink(path):
@@ -1576,6 +1579,9 @@ class DuplicateWorker(QThread):
                 continue
         groups = defaultdict(list)
         errors = 0
+        candidates = sum(len(rows) for rows in by_size.values() if len(rows) > 1)
+        completed = 0
+        self.progress_changed.emit(0, max(1, candidates), "ファイル内容を確認中（SHA-256）")
         for size, rows in by_size.items():
             if len(rows) < 2:
                 continue
@@ -1597,6 +1603,10 @@ class DuplicateWorker(QThread):
                     groups[(size, digest)].append(item)
                 except (OSError, PermissionError):
                     errors += 1
+                finally:
+                    completed += 1
+                    if completed % 10 == 0 or completed == candidates:
+                        self.progress_changed.emit(completed, max(1, candidates), "ファイル内容を確認中（SHA-256）")
         duplicates = []
         keep_by_path = {}
         for key, rows in groups.items():
@@ -1763,7 +1773,20 @@ class PromptFinderWindow(QMainWindow):
         # --- プログレスバー ---
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
+        self.progress_bar.setTextVisible(True)
         main_layout.addWidget(self.progress_bar)
+
+        # Results and current multi-selection are always visible.
+        counts_bar = QHBoxLayout()
+        self.result_count_label = QLabel("検索結果: 0 枚")
+        self.selected_count_label = QLabel("選択中: 0 枚")
+        self.result_count_label.setStyleSheet("font-weight: 600; color: #e2e6ed;")
+        self.selected_count_label.setStyleSheet("font-weight: 600; color: #60a5fa;")
+        counts_bar.addWidget(self.result_count_label)
+        counts_bar.addSpacing(24)
+        counts_bar.addWidget(self.selected_count_label)
+        counts_bar.addStretch()
+        main_layout.addLayout(counts_bar)
 
         # --- メイン分割領域 ---
         self.splitter = QSplitter(Qt.Horizontal)
@@ -2041,13 +2064,36 @@ class PromptFinderWindow(QMainWindow):
         self.btn_select_old_duplicates.setEnabled(False)
         self.btn_delete_duplicates.setEnabled(False)
         self.btn_find_duplicates.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setFormat("重複検索: 候補を調査中…")
         self.statusBar().showMessage("重複画像の内容を確認中（完全一致・SHA-256）...")
         worker = DuplicateWorker(self.db)
+        worker.progress_changed.connect(self._on_duplicate_progress)
         expected_seq = self.search_seq
         worker.duplicates_found.connect(lambda rows, mapping, errors: self._on_duplicates_found(rows, mapping, errors, expected_seq))
-        worker.finished.connect(lambda: self.btn_find_duplicates.setEnabled(True))
+        worker.finished.connect(lambda: self._on_duplicate_worker_finished(worker))
         self._track_worker(worker)
         worker.start()
+
+    def _on_duplicate_progress(self, current: int, total: int, phase: str):
+        if total <= 0:
+            self.progress_bar.setRange(0, 0)
+            self.progress_bar.setFormat(f"重複検索: {phase}…")
+        else:
+            self.progress_bar.setRange(0, total)
+            self.progress_bar.setValue(current)
+            self.progress_bar.setFormat(f"重複検索: {phase} %v / %m (%p%)")
+
+    def _on_duplicate_worker_finished(self, worker):
+        self.btn_find_duplicates.setEnabled(True)
+        # The original scanning progress bar belongs to ScanWorker while it runs.
+        if not (hasattr(self, "worker") and self.worker.isRunning()):
+            self.progress_bar.setVisible(False)
+
+    def _update_counters(self):
+        self.result_count_label.setText(f"検索結果: {len(self.model.items):,} 枚")
+        self.selected_count_label.setText(f"選択中: {len(self._selected_rows()):,} 枚")
 
     def _on_duplicates_found(self, rows: list[dict], keep_by_path: dict, errors: int, expected_seq: int):
         if self.search_seq != expected_seq:
@@ -2055,6 +2101,7 @@ class PromptFinderWindow(QMainWindow):
         self._duplicate_mode = True
         self._duplicate_keep_by_path = keep_by_path
         self.model.set_items(rows)
+        self._update_counters()
         self.list_view.scrollToTop()
         self.btn_select_old_duplicates.setEnabled(bool(keep_by_path))
         self.btn_delete_duplicates.setEnabled(bool(keep_by_path))
@@ -2077,6 +2124,7 @@ class PromptFinderWindow(QMainWindow):
                 count += 1
         if count:
             selection.select(bulk, QItemSelectionModel.Select)
+        self._update_counters()
         self.statusBar().showMessage(
             f"古い重複 {count}枚を選択しました。元ファイルはまだ削除していません。ゴミ箱ボタンで確認してください。"
         )
@@ -2141,6 +2189,7 @@ class PromptFinderWindow(QMainWindow):
         if seq_id != self.search_seq:
             return
         self.model.set_items(results)
+        self._update_counters()
         self.list_view.scrollToTop()
         if mode == "normal":
             if info_text:
@@ -2187,6 +2236,7 @@ class PromptFinderWindow(QMainWindow):
             self.preview_label.setText("ファイルが見つかりません")
 
     def on_selection_changed(self, selected, deselected):
+        self._update_counters()
         rows = self._selected_rows()
         if not rows:
             return
@@ -2290,6 +2340,9 @@ class PromptFinderWindow(QMainWindow):
         if deleted_paths:
             self.db.delete_paths(deleted_paths)
             self.model.remove_paths(set(deleted_paths))
+            for path in deleted_paths:
+                self._duplicate_keep_by_path.pop(path, None)
+            self._update_counters()
             self._current_detail_row = None
             self.preview_label.clear()
             self.preview_label.setText("削除完了")

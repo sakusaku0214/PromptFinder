@@ -31,3 +31,7 @@ release-test/
 
 # Test build outputs
 build-duplicate-test/
+
+# v1.1.2 build staging
+build-v112/
+
