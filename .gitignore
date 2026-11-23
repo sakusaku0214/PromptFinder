@@ -24,3 +24,7 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local release staging and isolated test
+release-v*/
+release-test/

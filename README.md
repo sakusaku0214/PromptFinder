@@ -1,3 +1,17 @@
+## Windowsユーザー向け：かんたん導入
+
+**Python不要。Windows 10/11 64bit向けのポータブル版です。**
+
+1. [Releases](https://github.com/sakusaku0214/PromptFinder/releases/latest) から `PromptFinderPro_v1.0.0_Windows_x64.zip` をダウンロード。
+2. ZIPを右クリック → 「すべて展開」。ZIP内から直接起動しないでください。
+3. 解凍した `PromptFinderPro.exe` を起動し、「フォルダ選択」→「スキャン / 更新」を実行。
+
+- 初回起動時に `ai_images_index_v2.db` と `config.json` が作られます。個人用データなので公開・共有しないでください。
+- Windows SmartScreenで警告が出る場合があります。配布元とSHA-256を確認し、不明なEXEを実行しないでください。
+- Windowsの別フォルダーでEXEの起動とDB初期作成を確認しました。別PCでの完全動作は未確認です。
+- 画像をゴミ箱へ移動する機能があります。重要な画像はバックアップしてください。
+
+---
 # AI生成画像プロンプト検索ツール (PromptFinderPro)
 
 ローカルに保存された大量の AI 生成画像を非破壊でインデックス化し、**プロンプト検索（日本語翻訳・マイナス除外対応）・モデル/LoRA フィルタ・プロンプト類似検索・見た目類似検索（dHash）・高速選別**を快適に行える Windows 向けデスクトップアプリケーションです。
