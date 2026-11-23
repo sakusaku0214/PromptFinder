@@ -28,3 +28,6 @@ Thumbs.db
 # Local release staging and isolated test
 release-v*/
 release-test/
+
+# Test build outputs
+build-duplicate-test/

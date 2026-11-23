@@ -4,6 +4,7 @@ import re
 import json
 import math
 import sqlite3
+import hashlib
 import subprocess
 import urllib.request
 import urllib.parse
@@ -23,7 +24,7 @@ except ImportError:
 
 from PySide6.QtCore import (
     Qt, QThread, Signal, QObject, QRunnable, QThreadPool,
-    QAbstractListModel, QModelIndex, QSize, QMimeData, QUrl, QTimer
+    QAbstractListModel, QModelIndex, QSize, QMimeData, QUrl, QTimer, QItemSelectionModel, QItemSelection
 )
 from PySide6.QtGui import QPixmap, QImage, QAction, QColor, QDrag, QKeySequence, QShortcut, QIcon
 from PySide6.QtWidgets import (
@@ -814,6 +815,14 @@ class DatabaseManager:
             )
         """)
 
+    def get_duplicate_candidates(self) -> list[dict]:
+        """Read only indexed image locations; file content is checked on disk."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return [dict(r) for r in conn.execute(
+                "SELECT path, mtime, rating, model, loras FROM images ORDER BY path"
+            ).fetchall()]
+
     def get_image_detail(self, path: str) -> dict | None:
         """右パネル表示用に1件の詳細メタデータのみを取得する"""
         with self._connect() as conn:
@@ -1285,6 +1294,8 @@ class ImageGridModel(QAbstractListModel):
 
         if role == Qt.DisplayRole:
             sim_prefix = f"[{row_data['similarity']}%] " if "similarity" in row_data else ""
+            if "_duplicate_keep" in row_data:
+                sim_prefix = "[残す・最新] " if row_data["_duplicate_keep"] else "[古い重複] "
             rating = row_data.get("rating") or 0
             star_prefix = f"{'★' * rating} " if rating > 0 else ""
             return f"{sim_prefix}{star_prefix}{os.path.basename(path)}"
@@ -1535,6 +1546,73 @@ class ScanWorker(QThread):
 # ==========================================
 # 5. メインGUIウィンドウ
 # ==========================================
+def sha256_file(path: str) -> str:
+    """Stream the entire file without loading large images into memory."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+class DuplicateWorker(QThread):
+    duplicates_found = Signal(list, dict, int)
+
+    def __init__(self, db: DatabaseManager):
+        super().__init__()
+        self.db = db
+
+    def run(self):
+        # Size prefilter dramatically reduces disk I/O on large collections.
+        from collections import defaultdict
+        by_size = defaultdict(list)
+        for row in self.db.get_duplicate_candidates():
+            path = row["path"]
+            try:
+                if os.path.isfile(path) and not os.path.islink(path):
+                    size = os.path.getsize(path)
+                    by_size[size].append(row)
+            except OSError:
+                continue
+        groups = defaultdict(list)
+        errors = 0
+        for size, rows in by_size.items():
+            if len(rows) < 2:
+                continue
+            for row in rows:
+                try:
+                    path = row["path"]
+                    # Detect files modified during reading.
+                    before = os.stat(path)
+                    if before.st_size != size:
+                        continue
+                    digest = sha256_file(path)
+                    after = os.stat(path)
+                    if before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns:
+                        continue
+                    item = dict(row)
+                    item["mtime"] = after.st_mtime
+                    item["_sha256"] = digest
+                    item["_size"] = size
+                    groups[(size, digest)].append(item)
+                except (OSError, PermissionError):
+                    errors += 1
+        duplicates = []
+        keep_by_path = {}
+        for key, rows in groups.items():
+            if len(rows) < 2:
+                continue
+            # Preserve most recently modified file (tie: deterministic path).
+            rows.sort(key=lambda r: (-r["mtime"], r["path"].casefold()))
+            keeper = rows[0]
+            for row in rows:
+                row["_duplicate_keep"] = (row["path"] == keeper["path"])
+                if row["path"] != keeper["path"]:
+                    keep_by_path[row["path"]] = (keeper["path"], key[0], key[1])
+            duplicates.extend(rows)
+        self.duplicates_found.emit(duplicates, keep_by_path, errors)
+
+
 class PromptFinderWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1544,6 +1622,8 @@ class PromptFinderWindow(QMainWindow):
         self.search_seq = 0
         self._active_workers: list[QThread] = []
         self._current_detail_row: dict | None = None
+        self._duplicate_keep_by_path: dict[str, tuple[str, int, str]] = {}
+        self._duplicate_mode = False
 
         self._build_ui()
         self._setup_shortcuts()
@@ -1663,6 +1743,22 @@ class PromptFinderWindow(QMainWindow):
         filter_bar.addWidget(self.combo_rating, 1)
         filter_bar.addWidget(self.combo_sort, 1)
         main_layout.addLayout(filter_bar)
+
+        duplicate_bar = QHBoxLayout()
+        self.btn_find_duplicates = QPushButton("重複画像を検索（完全一致）")
+        self.btn_find_duplicates.clicked.connect(self.find_duplicates)
+        self.btn_select_old_duplicates = QPushButton("古い重複を一括選択")
+        self.btn_select_old_duplicates.setEnabled(False)
+        self.btn_select_old_duplicates.clicked.connect(self.select_old_duplicates)
+        self.btn_delete_duplicates = QPushButton("選択した重複をゴミ箱へ")
+        self.btn_delete_duplicates.setObjectName("DangerBtn")
+        self.btn_delete_duplicates.setEnabled(False)
+        self.btn_delete_duplicates.clicked.connect(self.delete_selected_images)
+        duplicate_bar.addWidget(self.btn_find_duplicates)
+        duplicate_bar.addWidget(self.btn_select_old_duplicates)
+        duplicate_bar.addWidget(self.btn_delete_duplicates)
+        duplicate_bar.addStretch()
+        main_layout.addLayout(duplicate_bar)
 
         # --- プログレスバー ---
         self.progress_bar = QProgressBar()
@@ -1936,7 +2032,60 @@ class PromptFinderWindow(QMainWindow):
         self.combo_rating.blockSignals(False)
         self.perform_search()
 
+    def find_duplicates(self):
+        if any(isinstance(w, DuplicateWorker) and w.isRunning() for w in self._active_workers):
+            return
+        self.search_seq += 1
+        self._duplicate_mode = False
+        self._duplicate_keep_by_path = {}
+        self.btn_select_old_duplicates.setEnabled(False)
+        self.btn_delete_duplicates.setEnabled(False)
+        self.btn_find_duplicates.setEnabled(False)
+        self.statusBar().showMessage("重複画像の内容を確認中（完全一致・SHA-256）...")
+        worker = DuplicateWorker(self.db)
+        expected_seq = self.search_seq
+        worker.duplicates_found.connect(lambda rows, mapping, errors: self._on_duplicates_found(rows, mapping, errors, expected_seq))
+        worker.finished.connect(lambda: self.btn_find_duplicates.setEnabled(True))
+        self._track_worker(worker)
+        worker.start()
+
+    def _on_duplicates_found(self, rows: list[dict], keep_by_path: dict, errors: int, expected_seq: int):
+        if self.search_seq != expected_seq:
+            return
+        self._duplicate_mode = True
+        self._duplicate_keep_by_path = keep_by_path
+        self.model.set_items(rows)
+        self.list_view.scrollToTop()
+        self.btn_select_old_duplicates.setEnabled(bool(keep_by_path))
+        self.btn_delete_duplicates.setEnabled(bool(keep_by_path))
+        groups = len({(v[1], v[2]) for v in keep_by_path.values()})
+        self.statusBar().showMessage(
+            f"完全一致の重複: {groups}組 / {len(keep_by_path)}枚が整理候補 / 読取失敗: {errors}件。各組の最新1枚を保護します。"
+        )
+
+    def select_old_duplicates(self):
+        if not self._duplicate_mode:
+            return
+        selection = self.list_view.selectionModel()
+        selection.clearSelection()
+        bulk = QItemSelection()
+        count = 0
+        for row, item in enumerate(self.model.items):
+            if item["path"] in self._duplicate_keep_by_path:
+                index = self.model.index(row, 0)
+                bulk.select(index, index)
+                count += 1
+        if count:
+            selection.select(bulk, QItemSelectionModel.Select)
+        self.statusBar().showMessage(
+            f"古い重複 {count}枚を選択しました。元ファイルはまだ削除していません。ゴミ箱ボタンで確認してください。"
+        )
+
     def perform_search(self):
+        self._duplicate_mode = False
+        self._duplicate_keep_by_path = {}
+        self.btn_select_old_duplicates.setEnabled(False)
+        self.btn_delete_duplicates.setEnabled(False)
         self.search_seq += 1
         seq = self.search_seq
         params = {
@@ -2100,6 +2249,23 @@ class PromptFinderWindow(QMainWindow):
         rows = self._selected_rows()
         if not rows:
             return
+        # In duplicate view, refuse deletion of the preserved newest copy.
+        if self._duplicate_mode:
+            selected = [self.model.items[r]["path"] for r in rows]
+            if any(path not in self._duplicate_keep_by_path for path in selected):
+                QMessageBox.warning(self, "保護された画像", "各重複グループの最新画像は削除できません。古い重複のみ選択してください。")
+                return
+            for path in selected:
+                keeper, size, digest = self._duplicate_keep_by_path[path]
+                try:
+                    if (not os.path.isfile(path) or not os.path.isfile(keeper) or
+                            os.path.getsize(path) != size or os.path.getsize(keeper) != size or
+                            sha256_file(path) != digest or sha256_file(keeper) != digest):
+                        QMessageBox.warning(self, "変更を検出", "検索後にファイルが変更・移動されています。削除せず重複検索をやり直してください。")
+                        return
+                except OSError:
+                    QMessageBox.warning(self, "ファイル確認エラー", "安全確認ができないため削除を中止しました。")
+                    return
         reply = QMessageBox.question(
             self,
             "削除の確認",
